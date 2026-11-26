@@ -1,0 +1,122 @@
+
+import math
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# 1. Load the dataset
+data = pd.read_csv("electricity_consumption.csv")
+data["Date"] = pd.to_datetime(data["Date"])
+
+# 2. Explore and analyse the data
+print("First five records:")
+print(data.head())
+print("\nConsumption statistics:")
+print(data["Consumption_kWh"].describe())
+print("Average:", round(data["Consumption_kWh"].mean(), 2), "kWh")
+print("Maximum:", round(data["Consumption_kWh"].max(), 2), "kWh")
+print("Minimum:", round(data["Consumption_kWh"].min(), 2), "kWh")
+
+# 3. Plot daily consumption
+plt.figure(figsize=(10, 5))
+plt.plot(data["Date"], data["Consumption_kWh"])
+plt.title("Daily Electricity Consumption")
+plt.xlabel("Date")
+plt.ylabel("Consumption (kWh)")
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("outputs/daily_consumption.png")
+plt.show()
+
+# 4. Plot average monthly consumption
+data["Month"] = data["Date"].dt.month
+monthly = data.groupby("Month")["Consumption_kWh"].mean()
+plt.figure(figsize=(9, 5))
+plt.bar(monthly.index, monthly.values)
+plt.title("Average Monthly Electricity Consumption")
+plt.xlabel("Month")
+plt.ylabel("Average consumption (kWh)")
+plt.grid(axis="y")
+plt.tight_layout()
+plt.savefig("outputs/monthly_average.png")
+plt.show()
+
+# 5. Prepare features for machine learning
+data["Day_Index"] = np.arange(len(data))
+data["Day_Of_Week"] = data["Date"].dt.dayofweek
+data["Lag_1"] = data["Consumption_kWh"].shift(1)
+data["Rolling_7"] = data["Consumption_kWh"].shift(1).rolling(7).mean()
+model_data = data.dropna().copy()
+features = ["Day_Index", "Month", "Day_Of_Week", "Lag_1", "Rolling_7"]
+X = model_data[features]
+y = model_data["Consumption_kWh"]
+
+# 6. Split chronologically: first 80% for training, last 20% for testing
+split = int(len(model_data) * 0.8)
+X_train, X_test = X.iloc[:split], X.iloc[split:]
+y_train, y_test = y.iloc[:split], y.iloc[split:]
+
+# 7. Train Linear Regression and evaluate it
+model = LinearRegression()
+model.fit(X_train, y_train)
+predictions = model.predict(X_test)
+mae = mean_absolute_error(y_test, predictions)
+rmse = math.sqrt(mean_squared_error(y_test, predictions))
+r2 = r2_score(y_test, predictions)
+print("\nModel evaluation")
+print("MAE:", round(mae, 2))
+print("RMSE:", round(rmse, 2))
+print("R-squared:", round(r2, 3))
+
+plt.figure(figsize=(10, 5))
+plt.plot(model_data["Date"].iloc[split:], y_test.values, label="Actual")
+plt.plot(model_data["Date"].iloc[split:], predictions, label="Predicted")
+plt.title("Actual vs Predicted Electricity Consumption")
+plt.xlabel("Date")
+plt.ylabel("Consumption (kWh)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("outputs/actual_vs_predicted.png")
+plt.show()
+
+# 8. Forecast the next seven days recursively
+history = data[["Date", "Consumption_kWh"]].copy()
+future_rows = []
+for _ in range(7):
+    next_date = history["Date"].iloc[-1] + pd.Timedelta(days=1)
+    new_row = pd.DataFrame([{
+        "Day_Index": len(history),
+        "Month": next_date.month,
+        "Day_Of_Week": next_date.dayofweek,
+        "Lag_1": history["Consumption_kWh"].iloc[-1],
+        "Rolling_7": history["Consumption_kWh"].tail(7).mean()
+    }])
+    predicted_value = max(0, float(model.predict(new_row[features])[0]))
+    future_rows.append({
+        "Date": next_date,
+        "Predicted_Consumption_kWh": round(predicted_value, 2)
+    })
+    history = pd.concat([history, pd.DataFrame([{
+        "Date": next_date,
+        "Consumption_kWh": predicted_value
+    }])], ignore_index=True)
+
+forecast = pd.DataFrame(future_rows)
+print("\nNext seven days forecast:")
+print(forecast.to_string(index=False))
+forecast.to_csv("outputs/next_7_days_forecast.csv", index=False)
+
+plt.figure(figsize=(9, 5))
+plt.plot(data["Date"].tail(30), data["Consumption_kWh"].tail(30), label="Recent actual")
+plt.plot(forecast["Date"], forecast["Predicted_Consumption_kWh"], marker="o", label="Forecast")
+plt.title("Next 7 Days Electricity Consumption Forecast")
+plt.xlabel("Date")
+plt.ylabel("Consumption (kWh)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("outputs/seven_day_forecast.png")
+plt.show()
